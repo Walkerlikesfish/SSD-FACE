@@ -19,10 +19,12 @@ import numpy as np
 
 from tensorflow.contrib.image.python.ops import image_ops
 
+
 def areas(gt_bboxes):
     with tf.name_scope('bboxes_areas', [gt_bboxes]):
         ymin, xmin, ymax, xmax = tf.split(gt_bboxes, 4, axis=1)
         return (xmax - xmin) * (ymax - ymin)
+
 
 def intersection(gt_bboxes, default_bboxes):
     with tf.name_scope('bboxes_intersection', [gt_bboxes, default_bboxes]):
@@ -39,6 +41,8 @@ def intersection(gt_bboxes, default_bboxes):
         w = tf.maximum(int_xmax - int_xmin, 0.)
 
         return h * w
+
+
 def iou_matrix(gt_bboxes, default_bboxes):
     with tf.name_scope('iou_matrix', [gt_bboxes, default_bboxes]):
         inter_vol = intersection(gt_bboxes, default_bboxes)
@@ -47,6 +51,7 @@ def iou_matrix(gt_bboxes, default_bboxes):
 
         return tf.where(tf.equal(union_vol, 0.0),
                         tf.zeros_like(inter_vol), tf.truediv(inter_vol, union_vol))
+
 
 def do_dual_max_match(overlap_matrix, low_thres, high_thres, ignore_between=True, gt_max_first=True):
     '''
@@ -256,6 +261,7 @@ class AnchorEncoder(object):
             pred_cx = pred_location[:, 1] * self._prior_scaling[1] * anchor_w + anchor_cx
 
             return tf.split(tf.stack(self.center2point(pred_cy, pred_cx, pred_h, pred_w), axis=-1), num_anchors_per_layer, axis=0)
+
 
 class AnchorCreator(object):
     def __init__(self, img_shape, layers_shapes, anchor_scales, extra_anchor_scales, anchor_ratios, layer_steps):

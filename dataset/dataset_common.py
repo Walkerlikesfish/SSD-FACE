@@ -134,6 +134,15 @@ data_splits_num = {
     'val': 4952,
 }
 
+
+def database_get_batch():
+    """Use TF1.9 introduced tf.data API to extract data batch from `tf_records`
+
+
+    :return:
+    """
+
+
 def slim_get_batch(num_classes, batch_size, split_name, file_pattern, num_readers, num_preprocessing_threads, image_preprocessing_fn, anchor_encoder, num_epochs=None, is_training=True):
     """Gets a dataset tuple with instructions for reading Pascal VOC dataset.
 

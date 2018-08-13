@@ -17,6 +17,7 @@ import matplotlib.cm as mpcm
 
 from dataset import dataset_common
 
+
 def gain_translate_table():
     label2name_table = {}
     for class_name, labels_pair in dataset_common.VOC_LABELS.items():
@@ -24,6 +25,7 @@ def gain_translate_table():
     return label2name_table
 
 label2name_table = gain_translate_table()
+
 
 def colors_subselect(colors, num_classes=21):
     dt = len(colors) // num_classes
@@ -42,6 +44,7 @@ colors_tableau = [(255, 255, 255), (31, 119, 180), (174, 199, 232), (255, 127, 1
                  (148, 103, 189), (197, 176, 213), (140, 86, 75), (196, 156, 148),
                  (227, 119, 194), (247, 182, 210), (127, 127, 127), (199, 199, 199),
                  (188, 189, 34), (219, 219, 141), (23, 190, 207), (158, 218, 229)]
+
 
 def bboxes_draw_on_img(img, classes, scores, bboxes, thickness=2):
     shape = img.shape

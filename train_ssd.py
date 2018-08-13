@@ -410,7 +410,11 @@ def main(_):
     os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
 
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
-    config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False, intra_op_parallelism_threads=FLAGS.num_cpu_threads, inter_op_parallelism_threads=FLAGS.num_cpu_threads, gpu_options=gpu_options)
+
+    config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False,
+                            intra_op_parallelism_threads=FLAGS.num_cpu_threads,
+                            inter_op_parallelism_threads=FLAGS.num_cpu_threads,
+                            gpu_options=gpu_options)
 
     num_gpus = validate_batch_size_for_multi_gpu(FLAGS.batch_size)
 

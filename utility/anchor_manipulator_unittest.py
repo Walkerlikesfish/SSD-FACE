@@ -22,6 +22,7 @@ import tensorflow as tf
 from scipy.misc import imread, imsave, imshow, imresize
 import numpy as np
 import sys; sys.path.insert(0, ".")
+
 from utility import draw_toolbox
 from utility import anchor_manipulator
 from preprocessing import ssd_preprocessing
