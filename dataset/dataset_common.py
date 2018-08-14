@@ -141,6 +141,7 @@ def database_get_batch():
 
     :return:
     """
+    pass
 
 
 def slim_get_batch(num_classes, batch_size, split_name, file_pattern, num_readers, num_preprocessing_threads, image_preprocessing_fn, anchor_encoder, num_epochs=None, is_training=True):

@@ -64,12 +64,13 @@ def _ImageDimensions(image, rank=3):
 
 
 def apply_with_random_selector(x, func, num_cases):
-    """Computes func(x, sel), with sel sampled from [0...num_cases-1].
+    """Computes func(x, sel), with sel sampled from [0...num_cases-1] in a random(uniform) way.
+    *To randomize function*
 
       Args:
         x: input Tensor.
         func: Python function to apply.
-        num_cases: Python int32, number of cases to sample sel from.
+        num_cases: Python int32, number of cases to sample select from.
 
       Returns:
         The result of func(x, sel), where func receives the value of the
@@ -503,7 +504,8 @@ def preprocess_for_train(image, labels, bboxes, out_shape, data_format='channels
 
         # Randomly flip the image horizontally.
         random_sample_flip_image, bboxes = random_flip_left_right(random_sample_image, bboxes)
-        # Rescale to VGG input scale.
+        
+        # Rescale to VGG input scale -> rescale the image to `output_shape`
         random_sample_flip_resized_image = tf.image.resize_images(random_sample_flip_image, out_shape,
                                                                   method=tf.image.ResizeMethod.BILINEAR,
                                                                   align_corners=False)
@@ -519,6 +521,10 @@ def preprocess_for_train(image, labels, bboxes, out_shape, data_format='channels
             final_image = tf.stack([image_channels[2], image_channels[1], image_channels[0]], axis=-1, name='merge_bgr')
         if data_format == 'channels_first':
             final_image = tf.transpose(final_image, perm=(2, 0, 1))
+
+        # show the data-augmentation
+        # tf.summary.image(final_image)
+
         return final_image, labels, bboxes
 
 
@@ -526,13 +532,13 @@ def preprocess_for_eval(image, out_shape, data_format='channels_first', scope='s
                         output_rgb=True):
     """Preprocesses the given image for evaluation.
 
-  Args:
-    image: A `Tensor` representing an image of arbitrary size.
-    out_shape: The height and width of the image after preprocessing.
-    data_format: The data_format of the desired output image.
-  Returns:
-    A preprocessed image.
-  """
+      Args:
+        image: A `Tensor` representing an image of arbitrary size.
+        out_shape: The height and width of the image after preprocessing.
+        data_format: The data_format of the desired output image.
+      Returns:
+        A preprocessed image.
+    """
     with tf.name_scope(scope, 'ssd_preprocessing_eval', [image]):
         image = tf.to_float(image)
         image = tf.image.resize_images(image, out_shape, method=tf.image.ResizeMethod.BILINEAR, align_corners=False)
@@ -552,17 +558,17 @@ def preprocess_image(image, labels, bboxes, out_shape, is_training=False, data_f
                      output_rgb=True):
     """Preprocesses the given image.
 
-  Args:
-    image: A `Tensor` representing an image of arbitrary size.
-    labels: A `Tensor` containing all labels for all bboxes of this image.
-    bboxes: A `Tensor` containing all bboxes of this image, in range [0., 1.] with shape [num_bboxes, 4].
-    out_shape: The height and width of the image after preprocessing.
-    is_training: Wether we are in training phase.
-    data_format: The data_format of the desired output image.
-
-  Returns:
-    A preprocessed image.
-  """
+      Args:
+        image: A `Tensor` representing an image of arbitrary size.
+        labels: A `Tensor` containing all labels for all bboxes of this image.
+        bboxes: A `Tensor` containing all bboxes of this image, in range [0., 1.] with shape [num_bboxes, 4].
+        out_shape: The height and width of the image after preprocessing.
+        is_training: Wether we are in training phase.
+        data_format: The data_format of the desired output image.
+  
+    Returns:
+      A preprocessed image.
+    """
     if is_training:
         return preprocess_for_train(image, labels, bboxes, out_shape, data_format=data_format, output_rgb=output_rgb)
     else:

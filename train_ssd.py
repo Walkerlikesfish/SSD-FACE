@@ -152,6 +152,7 @@ def validate_batch_size_for_multi_gpu(batch_size):
     return 0
 
 def get_init_fn():
+    # `scaffolds` is used to handle the model/checkpoints/reload related parameters
     return scaffolds.get_init_fn_for_scaffold(FLAGS.model_dir, FLAGS.checkpoint_path,
                                             FLAGS.model_scope, FLAGS.checkpoint_model_scope,
                                             FLAGS.checkpoint_exclude_scopes, FLAGS.ignore_missing_vars,
@@ -418,6 +419,7 @@ def main(_):
 
     num_gpus = validate_batch_size_for_multi_gpu(FLAGS.batch_size)
 
+    distribution = tf.contrib.distribute.MirroredStrategy()
     # Set up a RunConfig to only save checkpoints once per training cycle.
     run_config = tf.estimator.RunConfig().replace(
                                         save_checkpoints_secs=FLAGS.save_checkpoints_secs).replace(
@@ -426,11 +428,12 @@ def main(_):
                                         keep_checkpoint_max=5).replace(
                                         tf_random_seed=FLAGS.tf_random_seed).replace(
                                         log_step_count_steps=FLAGS.log_every_n_steps).replace(
-                                        session_config=config)
+                                        session_config=config).replace(train_distribute=distribution)
 
-    replicate_ssd_model_fn = tf.contrib.estimator.replicate_model_fn(ssd_model_fn, loss_reduction=tf.losses.Reduction.MEAN)
+    # replicate_ssd_model_fn = tf.contrib.estimator.replicate_model_fn(ssd_model_fn, loss_reduction=tf.losses.Reduction.MEAN)
+    
     ssd_detector = tf.estimator.Estimator(
-        model_fn=replicate_ssd_model_fn, model_dir=FLAGS.model_dir, config=run_config,
+        model_fn=ssd_model_fn, model_dir=FLAGS.model_dir, config=run_config,
         params={
             'num_gpus': num_gpus,
             'data_format': FLAGS.data_format,
