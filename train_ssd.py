@@ -42,7 +42,7 @@ tf.app.flags.DEFINE_float(
     'gpu_memory_fraction', 1., 'GPU memory fraction to use.')
 # scaffold related configuration
 tf.app.flags.DEFINE_string(
-    'data_dir', './dataset/tfrecords',
+    'data_dir', '../data/VOCdevkit/tfdb/',
     'The directory where the dataset input data is stored.')
 tf.app.flags.DEFINE_integer(
     'num_classes', 21, 'Number of classes to use in the dataset.')
@@ -53,7 +53,7 @@ tf.app.flags.DEFINE_integer(
     'log_every_n_steps', 10,
     'The frequency with which logs are printed.')
 tf.app.flags.DEFINE_integer(
-    'save_summary_steps', 500,
+    'save_summary_steps', 100,
     'The frequency with which summaries are saved, in seconds.')
 tf.app.flags.DEFINE_integer(
     'save_checkpoints_secs', 7200,
@@ -69,7 +69,7 @@ tf.app.flags.DEFINE_integer(
     'max_number_of_steps', 120000,
     'The max number of steps to use for training.')
 tf.app.flags.DEFINE_integer(
-    'batch_size', 32,
+    'batch_size', 16,
     'Batch size for training and evaluation.')
 tf.app.flags.DEFINE_string(
     'data_format', 'channels_first', # 'channels_first' or 'channels_last'
@@ -85,7 +85,7 @@ tf.app.flags.DEFINE_float(
     'neg_threshold', 0.5, 'Matching threshold for the negtive examples in the loss function.')
 # optimizer related configuration
 tf.app.flags.DEFINE_integer(
-    'tf_random_seed', 20180503, 'Random seed for TensorFlow initializers.')
+    'tf_random_seed', 20180814, 'Random seed for TensorFlow initializers.')
 tf.app.flags.DEFINE_float(
     'weight_decay', 5e-4, 'The weight decay on the model weights.')
 tf.app.flags.DEFINE_float(

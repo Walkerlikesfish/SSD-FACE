@@ -87,7 +87,7 @@ def _bytes_list_feature(value):
 def _bytes_feature(value):
     """Wrapper for inserting bytes features into Example proto."""
     if isinstance(value, six.string_types):
-        value = six.binary_type(value, encoding='utf-8')
+        value = six.binary_type(value)
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
