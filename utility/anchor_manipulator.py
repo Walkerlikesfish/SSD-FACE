@@ -21,6 +21,8 @@ from tensorflow.contrib.image.python.ops import image_ops
 
 
 def areas(gt_bboxes):
+    ''' calc the area of gt_bboxes
+    '''
     with tf.name_scope('bboxes_areas', [gt_bboxes]):
         ymin, xmin, ymax, xmax = tf.split(gt_bboxes, 4, axis=1)
         return (xmax - xmin) * (ymax - ymin)
@@ -39,7 +41,7 @@ def intersection(gt_bboxes, default_bboxes):
         int_xmax = tf.minimum(xmax, gt_xmax)
         h = tf.maximum(int_ymax - int_ymin, 0.)
         w = tf.maximum(int_xmax - int_xmin, 0.)
-
+        
         return h * w
 
 
@@ -49,8 +51,10 @@ def iou_matrix(gt_bboxes, default_bboxes):
         # broadcast
         union_vol = areas(gt_bboxes) + tf.transpose(areas(default_bboxes), perm=[1, 0]) - inter_vol
 
-        return tf.where(tf.equal(union_vol, 0.0),
+        res = tf.where(tf.equal(union_vol, 0.0),
                         tf.zeros_like(inter_vol), tf.truediv(inter_vol, union_vol))
+        print res
+        return res
 
 
 def do_dual_max_match(overlap_matrix, low_thres, high_thres, ignore_between=True, gt_max_first=True):
@@ -123,13 +127,23 @@ class AnchorEncoder(object):
         self._clip = clip
 
     def center2point(self, center_y, center_x, height, width):
+        ''' center style (cx,cy,h,w) => point style (ymin,xmin,ymax,xmax)
+        '''
         return center_y - height / 2., center_x - width / 2., center_y + height / 2., center_x + width / 2.,
 
     def point2center(self, ymin, xmin, ymax, xmax):
+        ''' point style (cx,cy,h,w) => centre style (ymin,xmin,ymax,xmax)
+        '''
         height, width = (ymax - ymin), (xmax - xmin)
         return ymin + height / 2., xmin + width / 2., height, width
 
     def encode_all_anchors(self, labels, bboxes, all_anchors, all_num_anchors_depth, all_num_anchors_spatial, debug=False):
+        ''' 
+        
+        args:
+            labels: ground truth labels
+            bboxes: ground truth bboxes
+        '''
         # y, x, h, w are all in range [0, 1] relative to the original image size
         # shape info:
         # y_on_image, x_on_image: layers_shapes[0] * layers_shapes[1]
@@ -144,12 +158,14 @@ class AnchorEncoder(object):
             tiled_allowed_borders = []
             for ind, anchor in enumerate(all_anchors):
                 anchors_ymin_, anchors_xmin_, anchors_ymax_, anchors_xmax_ = self.center2point(anchor[0], anchor[1], anchor[2], anchor[3])
-
+                
+                # reshape the anchors_list -> e.g [1 * 38x38x4] like flatten the array
                 list_anchors_ymin.append(tf.reshape(anchors_ymin_, [-1]))
                 list_anchors_xmin.append(tf.reshape(anchors_xmin_, [-1]))
                 list_anchors_ymax.append(tf.reshape(anchors_ymax_, [-1]))
                 list_anchors_xmax.append(tf.reshape(anchors_xmax_, [-1]))
-
+                # shape (duplicate) the allowed_border to the same size as the point corrdinates list
+                # allowed_border indicates whether we allow the anchors go across the boarder of the image
                 tiled_allowed_borders.extend([self._allowed_borders[ind]] * all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
 
             anchors_ymin = tf.concat(list_anchors_ymin, 0, name='concat_ymin')
@@ -165,6 +181,7 @@ class AnchorEncoder(object):
 
             anchor_allowed_borders = tf.stack(tiled_allowed_borders, 0, name='concat_allowed_borders')
 
+            # use inside_mask to filter the anchors reside in a certain region (x-border - x+boarder, y-boarder - y+boarder)
             inside_mask = tf.logical_and(tf.logical_and(anchors_ymin > -anchor_allowed_borders * 1.,
                                                         anchors_xmin > -anchor_allowed_borders * 1.),
                                         tf.logical_and(anchors_ymax < (1. + anchor_allowed_borders * 1.),
@@ -179,7 +196,9 @@ class AnchorEncoder(object):
             #                 tf.int64, stateful=True)
 
             # with tf.control_dependencies([save_anchors_op]):
+            # use `iou_matrix` to calculate the overlap of given `bboxes` and `anchors_point`
             overlap_matrix = iou_matrix(bboxes, anchors_point) * tf.cast(tf.expand_dims(inside_mask, 0), tf.float32)
+            # call `do_dual_max_match` to 
             matched_gt, gt_scores = do_dual_max_match(overlap_matrix, self._ignore_threshold, self._positive_threshold)
             # get all positive matching positions
             matched_gt_mask = matched_gt > -1
@@ -291,14 +310,16 @@ class AnchorCreator(object):
                        [5, 5, 5, 5, 5]]
         '''
         with tf.name_scope('get_layer_anchors'):
+            # generate the x,y meshgrid first
             x_on_layer, y_on_layer = tf.meshgrid(tf.range(layer_shape[1]), tf.range(layer_shape[0]))
 
-            y_on_image = (tf.cast(y_on_layer, tf.float32) + offset) * layer_step / self._img_shape[0]
-            x_on_image = (tf.cast(x_on_layer, tf.float32) + offset) * layer_step / self._img_shape[1]
+            y_on_image = (tf.cast(y_on_layer, tf.float32) + offset) * layer_step / self._img_shape[0] # scale to [0,1]
+            x_on_image = (tf.cast(x_on_layer, tf.float32) + offset) * layer_step / self._img_shape[1] # scale to [0,1]
 
             num_anchors_along_depth = len(anchor_scale) * len(anchor_ratio) + len(extra_anchor_scale)
             num_anchors_along_spatial = layer_shape[1] * layer_shape[0]
-
+    
+            # generate the corresponding h,w 
             list_h_on_image = []
             list_w_on_image = []
 
@@ -309,7 +330,7 @@ class AnchorCreator(object):
                 list_w_on_image.append(scale)
                 global_index += 1
             # for other aspect ratio anchors
-            for scale_index, scale in enumerate(anchor_scale):
+            for scale_index, scale in enumerate(anchor_scale): # use anchor_scale.len to count the anchors numebr
                 for ratio_index, ratio in enumerate(anchor_ratio):
                     list_h_on_image.append(scale / math.sqrt(ratio))
                     list_w_on_image.append(scale * math.sqrt(ratio))
@@ -325,6 +346,7 @@ class AnchorCreator(object):
         all_anchors = []
         all_num_anchors_depth = []
         all_num_anchors_spatial = []
+        # enumerate for each layer 
         for layer_index, layer_shape in enumerate(self._layers_shapes):
             anchors_this_layer = self.get_layer_anchors(layer_shape,
                                                         self._anchor_scales[layer_index],
@@ -332,8 +354,8 @@ class AnchorCreator(object):
                                                         self._anchor_ratios[layer_index],
                                                         self._layer_steps[layer_index],
                                                         self._anchor_offset[layer_index])
-            all_anchors.append(anchors_this_layer[:-2])
-            all_num_anchors_depth.append(anchors_this_layer[-2])
-            all_num_anchors_spatial.append(anchors_this_layer[-1])
+            all_anchors.append(anchors_this_layer[:-2])  # all anchors information (x,y,w,h)
+            all_num_anchors_depth.append(anchors_this_layer[-2])  # variation numbers in scales and ratios
+            all_num_anchors_spatial.append(anchors_this_layer[-1]) # variation numbers (different locations) in spatial domain
         return all_anchors, all_num_anchors_depth, all_num_anchors_spatial
 

@@ -28,6 +28,7 @@ from preprocessing import ssd_preprocessing
 from utility import anchor_manipulator
 from utility import scaffolds
 
+slim = tf.contrib.slim
 # hardware related configuration
 tf.app.flags.DEFINE_integer(
     'num_readers', 8,
@@ -164,50 +165,135 @@ def get_init_fn():
 # the problem is that they shouldn't be splited
 global_anchor_info = dict()
 
-def input_pipeline(dataset_pattern='train-*', is_training=True, batch_size=FLAGS.batch_size):
+def data_mapping_fn(example_proto, is_training, image_preprocessing_fn):
+    keys_to_features = {
+        'image/encoded': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/format': tf.FixedLenFeature((), tf.string, default_value='jpeg'),
+        'image/filename': tf.FixedLenFeature((), tf.string, default_value=''),
+        'image/height': tf.FixedLenFeature([1], tf.int64),
+        'image/width': tf.FixedLenFeature([1], tf.int64),
+        'image/channels': tf.FixedLenFeature([1], tf.int64),
+        'image/shape': tf.FixedLenFeature([3], tf.int64),
+        'image/object/bbox/xmin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymin': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/xmax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/ymax': tf.VarLenFeature(dtype=tf.float32),
+        'image/object/bbox/label': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/difficult': tf.VarLenFeature(dtype=tf.int64),
+        'image/object/bbox/truncated': tf.VarLenFeature(dtype=tf.int64),
+    }
+    items_to_handlers = {
+        'image': slim.tfexample_decoder.Image('image/encoded', 'image/format'),
+        'filename': slim.tfexample_decoder.Tensor('image/filename'),
+        'shape': slim.tfexample_decoder.Tensor('image/shape'),
+        'object/bbox': slim.tfexample_decoder.BoundingBox(
+                ['ymin', 'xmin', 'ymax', 'xmax'], 'image/object/bbox/'),
+        'object/label': slim.tfexample_decoder.Tensor('image/object/bbox/label'),
+        'object/difficult': slim.tfexample_decoder.Tensor('image/object/bbox/difficult'),
+        'object/truncated': slim.tfexample_decoder.Tensor('image/object/bbox/truncated'),
+    }
+    decoder = slim.tfexample_decoder.TFExampleDecoder(keys_to_features, items_to_handlers)
+    [org_image, filename, shape, glabels_raw, gbboxes_raw, isdifficult] = decoder.decode(example_proto, ['image', 'filename', 'shape',
+                                                                     'object/label',
+                                                                     'object/bbox',
+                                                                     'object/difficult'])
+    
+    if is_training:
+        # if all is difficult, then keep the first one
+        isdifficult_mask =tf.cond(tf.count_nonzero(isdifficult, dtype=tf.int32) < tf.shape(isdifficult)[0],
+                                lambda : isdifficult < tf.ones_like(isdifficult),
+                                lambda : tf.one_hot(0, tf.shape(isdifficult)[0], on_value=True, off_value=False, dtype=tf.bool))
+
+        glabels_raw = tf.boolean_mask(glabels_raw, isdifficult_mask)
+        gbboxes_raw = tf.boolean_mask(gbboxes_raw, isdifficult_mask)
+
+        
+    # Pre-processing image, labels and bboxes.
+    out_shape = [FLAGS.train_image_size] * 2
+    anchor_creator = anchor_manipulator.AnchorCreator(out_shape,
+                                                        layers_shapes = [(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
+                                                        anchor_scales = [(0.1,), (0.2,), (0.375,), (0.55,), (0.725,), (0.9,)],
+                                                        extra_anchor_scales = [(0.1414,), (0.2739,), (0.4541,), (0.6315,), (0.8078,), (0.9836,)],
+                                                        anchor_ratios = [(1., 2., .5), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., .5), (1., 2., .5)],
+                                                        layer_steps = [8, 16, 32, 64, 100, 300])
+    
+    all_anchors, all_num_anchors_depth, all_num_anchors_spatial = anchor_creator.get_all_anchors()
+
+    num_anchors_per_layer = []
+    for ind in range(len(all_anchors)):
+        num_anchors_per_layer.append(all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
+
+    anchor_encoder_decoder = anchor_manipulator.AnchorEncoder(allowed_borders = [1.0] * 6,
+                                                        positive_threshold = FLAGS.match_threshold,
+                                                        ignore_threshold = FLAGS.neg_threshold,
+                                                        prior_scaling=[0.1, 0.1, 0.2, 0.2])
+
+    global global_anchor_info
+    global_anchor_info = {'decode_fn': lambda pred : anchor_encoder_decoder.decode_all_anchors(pred, num_anchors_per_layer),
+                          'num_anchors_per_layer': num_anchors_per_layer,
+                          'all_num_anchors_depth': all_num_anchors_depth,
+                          'encode_fn': lambda glabels_, gbboxes_: anchor_encoder_decoder.encode_all_anchors(glabels_, gbboxes_, all_anchors, all_num_anchors_depth, all_num_anchors_spatial)}
+    
+#     global global_anchor_info
+    
+#     global_anchor_info = {'decode_fn': lambda pred : anchor_encoder_decoder.decode_all_anchors(pred, num_anchors_per_layer)}
+
+    if is_training:
+        image, glabels, gbboxes = image_preprocessing_fn(org_image, glabels_raw, gbboxes_raw)
+    else:
+        image = image_preprocessing_fn(org_image, glabels_raw, gbboxes_raw)
+        glabels, gbboxes = glabels_raw, gbboxes_raw
+
+    gt_targets, gt_labels, gt_scores = global_anchor_info['encode_fn'](glabels, gbboxes)
+    
+    # return [image, filename, shape, gt_targets, gt_labels, gt_scores]
+    return image, {'shape': shape, 'loc_targets': gt_targets, 'cls_targets': gt_labels, 'match_scores': gt_scores}
+
+
+def input_pipeline(training_files='train-*', is_training=True, batch_size=FLAGS.batch_size):
     def input_fn():
-        out_shape = [FLAGS.train_image_size] * 2
-        anchor_creator = anchor_manipulator.AnchorCreator(out_shape,
-                                                    layers_shapes = [(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
-                                                    anchor_scales = [(0.1,), (0.2,), (0.375,), (0.55,), (0.725,), (0.9,)],
-                                                    extra_anchor_scales = [(0.1414,), (0.2739,), (0.4541,), (0.6315,), (0.8078,), (0.9836,)],
-                                                    anchor_ratios = [(1., 2., .5), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., .5), (1., 2., .5)],
-                                                    layer_steps = [8, 16, 32, 64, 100, 300])
-        all_anchors, all_num_anchors_depth, all_num_anchors_spatial = anchor_creator.get_all_anchors()
-        # all_anchors: [[(38x38x1),(38x38x1),(4x1),(4x1)],[(19x19x1),(19x19x1),(4x1),(4x1)]... ] -> recording all the anchors information
+        with tf.name_scope('post_forward'):
+            out_shape = [FLAGS.train_image_size] * 2
+            anchor_creator = anchor_manipulator.AnchorCreator(out_shape,
+                                                        layers_shapes = [(38, 38), (19, 19), (10, 10), (5, 5), (3, 3), (1, 1)],
+                                                        anchor_scales = [(0.1,), (0.2,), (0.375,), (0.55,), (0.725,), (0.9,)],
+                                                        extra_anchor_scales = [(0.1414,), (0.2739,), (0.4541,), (0.6315,), (0.8078,), (0.9836,)],
+                                                        anchor_ratios = [(1., 2., .5), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., 3., .5, 0.3333), (1., 2., .5), (1., 2., .5)],
+                                                        layer_steps = [8, 16, 32, 64, 100, 300])
+            all_anchors, all_num_anchors_depth, all_num_anchors_spatial = anchor_creator.get_all_anchors()
 
-        num_anchors_per_layer = []
-        for ind in range(len(all_anchors)):
-            num_anchors_per_layer.append(all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
+            num_anchors_per_layer = []
+            for ind in range(len(all_anchors)):
+                num_anchors_per_layer.append(all_num_anchors_depth[ind] * all_num_anchors_spatial[ind])
 
-        anchor_encoder_decoder = anchor_manipulator.AnchorEncoder(allowed_borders = [1.0] * 6,
-                                                            positive_threshold = FLAGS.match_threshold,
-                                                            ignore_threshold = FLAGS.neg_threshold,
-                                                            prior_scaling=[0.1, 0.1, 0.2, 0.2])
+            anchor_encoder_decoder = anchor_manipulator.AnchorEncoder(allowed_borders = [1.0] * 6,
+                                                                positive_threshold = FLAGS.match_threshold,
+                                                                ignore_threshold = FLAGS.neg_threshold,
+                                                                prior_scaling=[0.1, 0.1, 0.2, 0.2])
 
-        image_preprocessing_fn = lambda image_, labels_, bboxes_ : ssd_preprocessing.preprocess_image(image_, labels_, bboxes_, out_shape, is_training=is_training, data_format=FLAGS.data_format, output_rgb=False)
-        
-        anchor_encoder_fn = lambda glabels_, gbboxes_: anchor_encoder_decoder.encode_all_anchors(glabels_, gbboxes_, all_anchors, all_num_anchors_depth, all_num_anchors_spatial)
-        
-        anchor_decoder_fn = lambda pred : anchor_encoder_decoder.decode_all_anchors(pred, num_anchors_per_layer)
+#             global global_anchor_info
+#             global_anchor_info = {'decode_fn': lambda pred : anchor_encoder_decoder.decode_all_anchors(pred, num_anchors_per_layer),
+#                                 'num_anchors_per_layer': num_anchors_per_layer,
+#                                 'all_num_anchors_depth': all_num_anchors_depth,
+#                                 'encode_fn': lambda glabels_, gbboxes_: anchor_encoder_decoder.encode_all_anchors(glabels_, gbboxes_, all_anchors, all_num_anchors_depth, all_num_anchors_spatial)}
 
-        image, _, shape, loc_targets, cls_targets, match_scores = dataset_common.slim_get_batch(FLAGS.num_classes,
-                                                                                batch_size,
-                                                                                ('train' if is_training else 'val'),
-                                                                                os.path.join(FLAGS.data_dir, dataset_pattern),
-                                                                                FLAGS.num_readers,
-                                                                                FLAGS.num_preprocessing_threads,
-                                                                                image_preprocessing_fn,
-                                                                                anchor_encoder_fn,
-                                                                                num_epochs=FLAGS.train_epochs,
-                                                                                is_training=is_training)
-        global global_anchor_info
-        global_anchor_info = {'decode_fn': anchor_decoder_fn,
-                            'num_anchors_per_layer': num_anchors_per_layer,
-                            'all_num_anchors_depth': all_num_anchors_depth }
+            image_preprocessing_fn = lambda image_, labels_, bboxes_ : ssd_preprocessing.preprocess_image(image_, labels_, bboxes_, out_shape, is_training=is_training, data_format=FLAGS.data_format, output_rgb=False)
 
-        return image, {'shape': shape, 'loc_targets': loc_targets, 'cls_targets': cls_targets, 'match_scores': match_scores}
+#             anchor_encoder_fn = lambda glabels_, gbboxes_: anchor_encoder_decoder.encode_all_anchors(glabels_, gbboxes_, all_anchors, all_num_anchors_depth, all_num_anchors_spatial)
+
+            filenames = tf.placeholder(tf.string, shape=[None])
+            arga = tf.constant(True)
+
+            dataset = tf.data.TFRecordDataset(training_files)
+            dataset = dataset.map(lambda x: data_mapping_fn(x, is_training, image_preprocessing_fn))
+            dataset = dataset.repeat() # repeat the input infinitely
+            dataset = dataset.batch(batch_size) # set the batch size
+            iterator = dataset.make_initializable_iterator()
+
+            # return image, {'shape': shape, 'loc_targets': loc_targets, 'cls_targets': cls_targets, 'match_scores': match_scores}
+            return dataset
     return input_fn
+
 
 def modified_smooth_l1(bbox_pred, bbox_targets, bbox_inside_weights=1., bbox_outside_weights=1., sigma=1.):
     """
@@ -423,6 +509,7 @@ def main(_):
 
     num_gpus = validate_batch_size_for_multi_gpu(FLAGS.batch_size)
 
+    distribution = tf.contrib.distribute.MirroredStrategy()
     # Set up a RunConfig to only save checkpoints once per training cycle.
     run_config = tf.estimator.RunConfig().replace(
                                         save_checkpoints_secs=FLAGS.save_checkpoints_secs).replace(
@@ -431,12 +518,15 @@ def main(_):
                                         keep_checkpoint_max=5).replace(
                                         tf_random_seed=FLAGS.tf_random_seed).replace(
                                         log_step_count_steps=FLAGS.log_every_n_steps).replace(
-                                        session_config=config)
+                                        session_config=config).replace(train_distribute=distribution)
 
-    replicate_ssd_model_fn = tf.contrib.estimator.replicate_model_fn(ssd_model_fn, loss_reduction=tf.losses.Reduction.MEAN)
+    # replicate_ssd_model_fn = tf.contrib.estimator.replicate_model_fn(ssd_model_fn, loss_reduction=tf.losses.Reduction.MEAN)
+    
+    training_files = ["/playground/data/VOCdevkit/tfdb/train-00000-of-00004", "/playground/data/VOCdevkit/tfdb/train-00001-of-00004",
+                 "/playground/data/VOCdevkit/tfdb/train-00002-of-00004", "/playground/data/VOCdevkit/tfdb/train-00003-of-00004"]
     
     ssd_detector = tf.estimator.Estimator(
-        model_fn=replicate_ssd_model_fn, model_dir=FLAGS.model_dir, config=run_config,
+        model_fn=ssd_model_fn, model_dir=FLAGS.model_dir, config=run_config,
         params={
             'num_gpus': num_gpus,
             'data_format': FLAGS.data_format,
@@ -466,7 +556,7 @@ def main(_):
 
     #hook = tf.train.ProfilerHook(save_steps=50, output_dir='.', show_memory=True)
     print('Starting a training cycle.')
-    ssd_detector.train(input_fn=input_pipeline(dataset_pattern='train-*', is_training=True, batch_size=FLAGS.batch_size),
+    ssd_detector.train(input_fn=input_pipeline(training_files=training_files, is_training=True, batch_size=FLAGS.batch_size),
                     hooks=[logging_hook], max_steps=FLAGS.max_number_of_steps)
 
 if __name__ == '__main__':
