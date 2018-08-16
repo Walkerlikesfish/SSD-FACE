@@ -306,6 +306,18 @@ def ssd_random_sample_patch(image, labels, bboxes, ratio_list=[0.1, 0.3, 0.5, 0.
 
 
 def ssd_random_expand(image, bboxes, ratio=2., name=None):
+    """ expande the image and corresponding bboxes with `ratio`
+
+    args:
+      image: 3D-tensor[height,width,3]
+      bboxes: 1D-tensor [1,4]
+      ratio: float
+      name: unused
+
+    return:
+      big_canvas: 3D-tensor[h,w,3]
+      new_bboxes: 1D-tensor
+    """
     with tf.name_scope('ssd_random_expand'):
         image = tf.convert_to_tensor(image, name='image')
         if image.get_shape().ndims != 3:
@@ -337,55 +349,39 @@ def ssd_random_expand(image, bboxes, ratio=2., name=None):
             tf.stack([canvas_height, canvas_width, canvas_height, canvas_width]), bboxes.dtype)
 
 
-# def ssd_random_sample_patch_wrapper(image, labels, bboxes):
-#   with tf.name_scope('ssd_random_sample_patch_wrapper'):
-#     orgi_image, orgi_labels, orgi_bboxes = image, labels, bboxes
-#     def check_bboxes(bboxes):
-#       areas = (bboxes[:, 3] - bboxes[:, 1]) * (bboxes[:, 2] - bboxes[:, 0])
-#       return tf.logical_and(tf.logical_and(areas < 0.9, areas > 0.001),
-#                             tf.logical_and((bboxes[:, 3] - bboxes[:, 1]) > 0.025, (bboxes[:, 2] - bboxes[:, 0]) > 0.025))
-
-#     index = 0
-#     max_attempt = 3
-#     def condition(index, image, labels, bboxes):
-#       return tf.logical_or(tf.logical_and(tf.reduce_sum(tf.cast(check_bboxes(bboxes), tf.int64)) < 1, tf.less(index, max_attempt)), tf.less(index, 1))
-
-#     def body(index, image, labels, bboxes):
-#       image, bboxes = tf.cond(tf.random_uniform([], minval=0., maxval=1., dtype=tf.float32) < 0.5,
-#                       lambda: (image, bboxes),
-#                       lambda: ssd_random_expand(image, bboxes, tf.random_uniform([1], minval=1.1, maxval=4., dtype=tf.float32)[0]))
-#       # Distort image and bounding boxes.
-#       random_sample_image, labels, bboxes = ssd_random_sample_patch(image, labels, bboxes, ratio_list=[-0.1, 0.1, 0.3, 0.5, 0.7, 0.9, 1.])
-#       random_sample_image.set_shape([None, None, 3])
-#       return index+1, random_sample_image, labels, bboxes
-
-#     [index, image, labels, bboxes] = tf.while_loop(condition, body, [index, orgi_image, orgi_labels, orgi_bboxes], parallel_iterations=4, back_prop=False, swap_memory=True)
-
-#     valid_mask = check_bboxes(bboxes)
-#     labels, bboxes = tf.boolean_mask(labels, valid_mask), tf.boolean_mask(bboxes, valid_mask)
-#     return tf.cond(tf.less(index, max_attempt),
-#                 lambda : (image, labels, bboxes),
-#                 lambda : (orgi_image, orgi_labels, orgi_bboxes))
-
 def ssd_random_sample_patch_wrapper(image, labels, bboxes):
+    """The wrapper to run the sample patch with a prob of (0.5)
+    first it will run an image expand, then apply patch extraction by certain ratio
+    """
     with tf.name_scope('ssd_random_sample_patch_wrapper'):
         orgi_image, orgi_labels, orgi_bboxes = image, labels, bboxes
 
         def check_bboxes(bboxes):
+            """ check the bboxes to restrict the shape and area of bboxes, to ensure the boxes is neither too narrow or too wide or too small 
+            args:
+              bboxes: 2D-Tensors[:,4]
+
+            return:
+              bools: 1D-Tensors
+            """
             areas = (bboxes[:, 3] - bboxes[:, 1]) * (bboxes[:, 2] - bboxes[:, 0])
+            # logic: ((areas<0.9 and areas>0.001) and (bboxes[:,3]-bboxes[:,1] > 0.025 and bboxes[:,2] - bboxes[:,0])
+            # restrict the shape and area of bboxes, to ensure the boxes is neither too narrow or too wide or too small 
             return tf.logical_and(tf.logical_and(areas < 0.9, areas > 0.001),
                                   tf.logical_and((bboxes[:, 3] - bboxes[:, 1]) > 0.025,
                                                  (bboxes[:, 2] - bboxes[:, 0]) > 0.025))
 
         index = 0
-        max_attempt = 3
+        max_attempt = 3 
 
         def condition(index, image, labels, bboxes, orgi_image, orgi_labels, orgi_bboxes):
+            # logic: (sum(check_bboxes)<1 and index<max_attempt) or index<1 
             return tf.logical_or(
                 tf.logical_and(tf.reduce_sum(tf.cast(check_bboxes(bboxes), tf.int64)) < 1, tf.less(index, max_attempt)),
                 tf.less(index, 1))
 
         def body(index, image, labels, bboxes, orgi_image, orgi_labels, orgi_bboxes):
+            # 50% chance to call the ssd_random_expand -> to generate an expaneded image
             image, bboxes = tf.cond(tf.random_uniform([], minval=0., maxval=1., dtype=tf.float32) < 0.5,
                                     lambda: (orgi_image, orgi_bboxes),
                                     lambda: ssd_random_expand(orgi_image, orgi_bboxes,
@@ -456,7 +452,11 @@ def unwhiten_image(image):
 
 
 def random_flip_left_right(image, bboxes):
+  """Random flip the image horizontally
+
+  """
     with tf.name_scope('random_flip_left_right'):
+        # randomize the flip
         uniform_random = tf.random_uniform([], 0, 1.0)
         mirror_cond = tf.less(uniform_random, .5)
         # Flip image.
