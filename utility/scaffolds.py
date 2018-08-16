@@ -22,24 +22,31 @@ import sys
 import tensorflow as tf
 
 def get_init_fn_for_scaffold(model_dir, checkpoint_path, model_scope, checkpoint_model_scope, checkpoint_exclude_scopes, ignore_missing_vars, name_remap=None):
-    """
-
-    :param model_dir:
-    :param checkpoint_path:
-    :param model_scope:
-    :param checkpoint_model_scope:
-    :param checkpoint_exclude_scopes:
-    :param ignore_missing_vars:
-    :param name_remap:
+    """scaffold init function
+    The logic is:
+    1) Extract the TRAINABLE_VARIABLES in current map;
+    2) Load ther checkpoint from pointed path; Meanwhile replace the variable name (scope) `current graph name scope` to the `ckpt namescope` 
+    to facilitate the weight loding -> `model_scope`, `checkpoint_model_scope`, `name_remap`
+    3) 
+    :param model_dir: str: the model checkpoint saving dir
+    :param checkpoint_path: str:  pre-load checkpoint path
+    :param model_scope: str: 
+    :param checkpoint_model_scope: 
+    :param checkpoint_exclude_scopes: str,seperated with ',': exclude namescopes in checkpoints
+    :param ignore_missing_vars: 
+    :param name_remap:  dict: 
     :return:
     """
     if tf.train.latest_checkpoint(model_dir):
         tf.logging.info('Ignoring --checkpoint_path because a checkpoint already exists in %s.' % model_dir)
         return None
+
     exclusion_scopes = []
     if checkpoint_exclude_scopes:
         exclusion_scopes = [scope.strip() for scope in checkpoint_exclude_scopes.split(',')]
 
+    # 1) collect the trainable varaibles from the loaded graph
+    #    save it to variables_to_restore
     variables_to_restore = []
     for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
         excluded = False
@@ -50,6 +57,8 @@ def get_init_fn_for_scaffold(model_dir, checkpoint_path, model_scope, checkpoint
         if not excluded:
             variables_to_restore.append(var)
 
+    #2) replace the `current_model` scope to this `checkpoint_model_scope` to facilitate the varibale weight loading process
+    # at the same time remap the var names following the `remap` dict
     if checkpoint_model_scope is not None:
         if checkpoint_model_scope.strip() == '':
             variables_to_restore = {var.op.name.replace(model_scope + '/', ''): var for var in variables_to_restore}
@@ -61,13 +70,14 @@ def get_init_fn_for_scaffold(model_dir, checkpoint_path, model_scope, checkpoint
                 found = False
                 for k, v in name_remap.items():
                     if k in var_name:
-                        renamed_variables_to_restore[var_name.replace(k, v)] = var
+                        renamed_variables_to_restore[var_name.replace(k, v)] = var # replace the var name in `variable_to_restore` following the remap dict
                         found = True
                         break
                 if not found:
                     renamed_variables_to_restore[var_name] = var
             variables_to_restore = renamed_variables_to_restore
 
+    # judge if checkpoint_path is a single `ckpt` file or a folder of checkpoints
     checkpoint_path = tf.train.latest_checkpoint(checkpoint_path) if tf.gfile.IsDirectory(checkpoint_path) else checkpoint_path
 
     tf.logging.info('Fine-tuning from %s. Ignoring missing vars: %s.' % (checkpoint_path, ignore_missing_vars))
@@ -75,7 +85,7 @@ def get_init_fn_for_scaffold(model_dir, checkpoint_path, model_scope, checkpoint
     if not variables_to_restore:
         raise ValueError('variables_to_restore cannot be empty')
 
-    if ignore_missing_vars:
+    if ignore_missing_vars: # rebuild the variables_to_restore
         reader = tf.train.NewCheckpointReader(checkpoint_path)
         if isinstance(variables_to_restore, dict):
             var_dict = variables_to_restore

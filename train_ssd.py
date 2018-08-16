@@ -269,12 +269,13 @@ def ssd_model_fn(features, labels, mode, params):
     #                         tf.int64, stateful=True)
     # with tf.control_dependencies([save_image_op]):
 
-    #print(all_num_anchors_depth)
     with tf.variable_scope(params['model_scope'], default_name=None, values=[features], reuse=tf.AUTO_REUSE):
         backbone = ssd_net.VGG16Backbone(params['data_format'])
+
         feature_layers = backbone.forward(features, training=(mode == tf.estimator.ModeKeys.TRAIN))
-        #print(feature_layers)
+        # get feature layers
         location_pred, cls_pred = ssd_net.multibox_head(feature_layers, params['num_classes'], all_num_anchors_depth, data_format=params['data_format'])
+        # get location,cls pred from multibox_head
 
         if params['data_format'] == 'channels_first':
             cls_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in cls_pred]
@@ -283,11 +284,17 @@ def ssd_model_fn(features, labels, mode, params):
         cls_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, params['num_classes']]) for pred in cls_pred]
         location_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, 4]) for pred in location_pred]
 
+        print(cls_pred, location_pred)
+
         cls_pred = tf.concat(cls_pred, axis=1)
         location_pred = tf.concat(location_pred, axis=1)
 
+        print(cls_pred, location_pred)
+
         cls_pred = tf.reshape(cls_pred, [-1, params['num_classes']])
         location_pred = tf.reshape(location_pred, [-1, 4])
+
+        print(cls_pred, location_pred)
 
     with tf.device('/cpu:0'):
         with tf.control_dependencies([cls_pred, location_pred]):
@@ -472,37 +479,3 @@ def main(_):
 if __name__ == '__main__':
   tf.logging.set_verbosity(tf.logging.INFO)
   tf.app.run()
-
-
-    # cls_targets = tf.reshape(cls_targets, [-1])
-    # match_scores = tf.reshape(match_scores, [-1])
-    # loc_targets = tf.reshape(loc_targets, [-1, 4])
-
-    # # each positive examples has one label
-    # positive_mask = cls_targets > 0
-    # n_positives = tf.count_nonzero(positive_mask)
-
-    # negtive_mask = tf.logical_and(tf.equal(cls_targets, 0), match_scores > 0.)
-    # n_negtives = tf.count_nonzero(negtive_mask)
-
-    # n_neg_to_select = tf.cast(params['negative_ratio'] * tf.cast(n_positives, tf.float32), tf.int32)
-    # n_neg_to_select = tf.minimum(n_neg_to_select, tf.cast(n_negtives, tf.int32))
-
-    # # hard negative mining for classification
-    # predictions_for_bg = tf.nn.softmax(cls_pred)[:, 0]
-
-    # prob_for_negtives = tf.where(negtive_mask,
-    #                        0. - predictions_for_bg,
-    #                        # ignore all the positives
-    #                        0. - tf.ones_like(predictions_for_bg))
-    # topk_prob_for_bg, _ = tf.nn.top_k(prob_for_negtives, k=n_neg_to_select)
-    # selected_neg_mask = prob_for_negtives > topk_prob_for_bg[-1]
-
-    # # include both selected negtive and all positive examples
-    # final_mask = tf.stop_gradient(tf.logical_or(tf.logical_and(negtive_mask, selected_neg_mask), positive_mask))
-    # total_examples = tf.count_nonzero(final_mask)
-
-    # glabels = tf.boolean_mask(tf.clip_by_value(cls_targets, 0, FLAGS.num_classes), final_mask)
-    # cls_pred = tf.boolean_mask(cls_pred, final_mask)
-    # location_pred = tf.boolean_mask(location_pred, tf.stop_gradient(positive_mask))
-    # loc_targets = tf.boolean_mask(loc_targets, tf.stop_gradient(positive_mask))

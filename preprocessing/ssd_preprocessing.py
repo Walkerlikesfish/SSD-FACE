@@ -452,9 +452,9 @@ def unwhiten_image(image):
 
 
 def random_flip_left_right(image, bboxes):
-  """Random flip the image horizontally
+    """Random flip the image horizontally
 
-  """
+    """
     with tf.name_scope('random_flip_left_right'):
         # randomize the flip
         uniform_random = tf.random_uniform([], 0, 1.0)
