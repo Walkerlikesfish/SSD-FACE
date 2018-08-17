@@ -44,6 +44,12 @@ VOC_LABELS = {
     'tvmonitor': (20, 'Indoor'),
 }
 
+
+VOC_FACE_LABELS = {
+    'none': (0, 'Background'),
+    'face': (1, 'face'),
+}
+
 COCO_LABELS = {
     "bench":  (14, 'outdoor') ,
     "skateboard":  (37, 'sports') ,
@@ -130,8 +136,8 @@ COCO_LABELS = {
 
 # use dataset_inspect.py to get these summary
 data_splits_num = {
-    'train': 22136,
-    'val': 4952,
+    'train': 12880,
+    'val': 3226,
 }
 
 
@@ -195,7 +201,7 @@ def slim_get_batch(num_classes, batch_size, split_name, file_pattern, num_reader
     decoder = slim.tfexample_decoder.TFExampleDecoder(keys_to_features, items_to_handlers)
 
     labels_to_names = {}
-    for name, pair in VOC_LABELS.items():
+    for name, pair in VOC_FACE_LABELS.items():
         labels_to_names[pair[0]] = name
 
     dataset = slim.dataset.Dataset(
@@ -221,14 +227,14 @@ def slim_get_batch(num_classes, batch_size, split_name, file_pattern, num_reader
                                                                      'object/bbox',
                                                                      'object/difficult'])
 
-    if is_training:
-        # if all is difficult, then keep the first one
-        isdifficult_mask =tf.cond(tf.count_nonzero(isdifficult, dtype=tf.int32) < tf.shape(isdifficult)[0],
-                                lambda : isdifficult < tf.ones_like(isdifficult),
-                                lambda : tf.one_hot(0, tf.shape(isdifficult)[0], on_value=True, off_value=False, dtype=tf.bool))
+    # if is_training:
+    #     # if all is difficult, then keep the first one
+    #     isdifficult_mask =tf.cond(tf.count_nonzero(isdifficult, dtype=tf.int32) < tf.shape(gbboxes_raw)[0], # tf.shape(isdifficult) 
+    #                             lambda : isdifficult < tf.ones_like(isdifficult),
+    #                             lambda : tf.one_hot(0, tf.shape(isdifficult)[0], on_value=True, off_value=False, dtype=tf.bool))
 
-        glabels_raw = tf.boolean_mask(glabels_raw, isdifficult_mask)
-        gbboxes_raw = tf.boolean_mask(gbboxes_raw, isdifficult_mask)
+    #     glabels_raw = tf.boolean_mask(glabels_raw, isdifficult_mask)
+    #     gbboxes_raw = tf.boolean_mask(gbboxes_raw, isdifficult_mask)
 
     # Pre-processing image, labels and bboxes.
 

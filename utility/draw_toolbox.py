@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
-import cv2
+from PIL import Image, ImageFont, ImageDraw, ImageEnhance
 import matplotlib.cm as mpcm
+import numpy as np
+# import cv2
 
 from dataset import dataset_common
 
@@ -74,3 +76,24 @@ def bboxes_draw_on_img(img, classes, scores, bboxes, thickness=2):
 
     return img
 
+def bboxes_draw_on_img_nocv2(img, classes, scores, bboxes, thickness=2):
+    shape = img.shape
+    img = Image.fromarray(np.uint8(img*255))
+    scale = 0.4
+    text_thickness = 1
+    line_type = 8
+    draw = ImageDraw.Draw(img)
+
+    # print(bboxes.shape[0])
+    for i in range(bboxes.shape[0]):
+        if classes[i] < 1: continue
+        bbox = bboxes[i]
+        color = colors_tableau[1]
+        # Draw bounding boxes
+        p1 = (int(bbox[0] * shape[0]), int(bbox[1] * shape[1]))
+        p2 = (int(bbox[2] * shape[0]), int(bbox[3] * shape[1]))
+        if (p2[0] - p1[0] < 1) or (p2[1] - p1[1] < 1):
+            continue    
+        draw.rectangle((p1[::-1], p2[::-1]), fill="red")
+
+    return img

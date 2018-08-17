@@ -382,7 +382,8 @@ def ssd_random_sample_patch_wrapper(image, labels, bboxes):
 
         def body(index, image, labels, bboxes, orgi_image, orgi_labels, orgi_bboxes):
             # 50% chance to call the ssd_random_expand -> to generate an expaneded image
-            image, bboxes = tf.cond(tf.random_uniform([], minval=0., maxval=1., dtype=tf.float32) < 0.5,
+            # set the float value here to control the random sample propotion
+            image, bboxes = tf.cond(tf.random_uniform([], minval=0., maxval=1., dtype=tf.float32) < 0.1,
                                     lambda: (orgi_image, orgi_bboxes),
                                     lambda: ssd_random_expand(orgi_image, orgi_bboxes,
                                                               tf.random_uniform([1], minval=1.1, maxval=4.,
@@ -445,10 +446,21 @@ def _mean_image_subtraction(image, means):
 def unwhiten_image(image):
     means = [_R_MEAN, _G_MEAN, _B_MEAN]
     num_channels = image.get_shape().as_list()[-1]
+    print(image.get_shape())
     channels = tf.split(axis=2, num_or_size_splits=num_channels, value=image)
     for i in range(num_channels):
         channels[i] += means[i]
     return tf.concat(axis=2, values=channels)
+
+
+def unwhiten_image_train(image):
+    means = [_R_MEAN, _G_MEAN, _B_MEAN]
+    num_channels = image.get_shape().as_list()[0]
+    
+    channels = tf.split(axis=0, num_or_size_splits=num_channels, value=image)
+    for i in range(num_channels):
+        channels[i] += means[i]
+    return tf.transpose(tf.concat(axis=0, values=channels), perm=[1,2,0])
 
 
 def random_flip_left_right(image, bboxes):
@@ -494,7 +506,7 @@ def preprocess_for_train(image, labels, bboxes, out_shape, data_format='channels
                                                    lambda x, ordering: distort_color(x, ordering, True),
                                                    num_cases=4)
 
-        random_sample_image, labels, bboxes = ssd_random_sample_patch_wrapper(distort_image, labels, bboxes)
+        # random_sample_image, labels, bboxes = ssd_random_sample_patch_wrapper(distort_image, labels, bboxes)
         # image, bboxes = tf.cond(tf.random_uniform([1], minval=0., maxval=1., dtype=tf.float32)[0] < 0.25,
         #                     lambda: (image, bboxes),
         #                     lambda: ssd_random_expand(image, bboxes, tf.random_uniform([1], minval=2, maxval=4, dtype=tf.int32)[0]))
@@ -503,7 +515,8 @@ def preprocess_for_train(image, labels, bboxes, out_shape, data_format='channels
         # random_sample_image, labels, bboxes = ssd_random_sample_patch(image, labels, bboxes, ratio_list=[0.1, 0.3, 0.5, 0.7, 0.9, 1.])
 
         # Randomly flip the image horizontally.
-        random_sample_flip_image, bboxes = random_flip_left_right(random_sample_image, bboxes)
+        # random_sample_flip_image, bboxes = random_flip_left_right(random_sample_image, bboxes)
+        random_sample_flip_image, bboxes = random_flip_left_right(distort_image, bboxes)
         
         # Rescale to VGG input scale -> rescale the image to `output_shape`
         random_sample_flip_resized_image = tf.image.resize_images(random_sample_flip_image, out_shape,

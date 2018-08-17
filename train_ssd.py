@@ -20,6 +20,7 @@ import os
 import sys
 
 import tensorflow as tf
+import numpy as np
 
 from net import ssd_net
 
@@ -33,7 +34,7 @@ tf.app.flags.DEFINE_integer(
     'num_readers', 8,
     'The number of parallel readers that read data from the dataset.')
 tf.app.flags.DEFINE_integer(
-    'num_preprocessing_threads', 24,
+    'num_preprocessing_threads', 8,
     'The number of threads used to create the batches.')
 tf.app.flags.DEFINE_integer(
     'num_cpu_threads', 0,
@@ -42,10 +43,12 @@ tf.app.flags.DEFINE_float(
     'gpu_memory_fraction', 1., 'GPU memory fraction to use.')
 # scaffold related configuration
 tf.app.flags.DEFINE_string(
-    'data_dir', '../data/VOCdevkit/tfdb/',
+    'data_dir', '../data/WIDERFace/tfrecords/',
+    # 'data_dir', '../data/VOCdevkit/tfdb/',
     'The directory where the dataset input data is stored.')
 tf.app.flags.DEFINE_integer(
-    'num_classes', 21, 'Number of classes to use in the dataset.')
+    'num_classes', 64, 'Number of classes to use in the dataset.')
+    # 'num_classes', 21, 'Number of classes to use in the dataset.')
 tf.app.flags.DEFINE_string(
     'model_dir', './logs/',
     'The directory where the model will be stored.')
@@ -56,7 +59,7 @@ tf.app.flags.DEFINE_integer(
     'save_summary_steps', 100,
     'The frequency with which summaries are saved, in seconds.')
 tf.app.flags.DEFINE_integer(
-    'save_checkpoints_secs', 7200,
+    'save_checkpoints_secs', 5000,
     'The frequency with which the model is saved, in seconds.')
 # model related configuration
 tf.app.flags.DEFINE_integer(
@@ -69,7 +72,7 @@ tf.app.flags.DEFINE_integer(
     'max_number_of_steps', 120000,
     'The max number of steps to use for training.')
 tf.app.flags.DEFINE_integer(
-    'batch_size', 16,
+    'batch_size', 32,
     'Batch size for training and evaluation.')
 tf.app.flags.DEFINE_string(
     'data_format', 'channels_first', # 'channels_first' or 'channels_last'
@@ -78,16 +81,16 @@ tf.app.flags.DEFINE_string(
     'with CPU. If left unspecified, the data format will be chosen '
     'automatically based on whether TensorFlow was built for CPU or GPU.')
 tf.app.flags.DEFINE_float(
-    'negative_ratio', 3., 'Negative ratio in the loss function.')
+    'negative_ratio', 2., 'Negative ratio in the loss function.')
 tf.app.flags.DEFINE_float(
     'match_threshold', 0.5, 'Matching threshold in the loss function.')
 tf.app.flags.DEFINE_float(
     'neg_threshold', 0.5, 'Matching threshold for the negtive examples in the loss function.')
 # optimizer related configuration
 tf.app.flags.DEFINE_integer(
-    'tf_random_seed', 20180814, 'Random seed for TensorFlow initializers.')
+    'tf_random_seed', 20180817, 'Random seed for TensorFlow initializers.')
 tf.app.flags.DEFINE_float(
-    'weight_decay', 5e-4, 'The weight decay on the model weights.')
+    'weight_decay', 1e-4, 'The weight decay on the model weights.')
 tf.app.flags.DEFINE_float(
     'momentum', 0.9,
     'The momentum for the MomentumOptimizer and RMSPropOptimizer.')
@@ -231,20 +234,21 @@ def modified_smooth_l1(bbox_pred, bbox_targets, bbox_inside_weights=1., bbox_out
         return outside_mul
 
 
-# from scipy.misc import imread, imsave, imshow, imresize
-# import numpy as np
-# from utility import draw_toolbox
+from scipy.misc import imread, imsave, imshow, imresize
+import numpy as np
+from utility import draw_toolbox
 
-# def save_image_with_bbox(image, labels_, scores_, bboxes_):
-#     if not hasattr(save_image_with_bbox, "counter"):
-#         save_image_with_bbox.counter = 0  # it doesn't exist yet, so initialize it
-#     save_image_with_bbox.counter += 1
+def save_image_with_bbox(image, labels_, scores_, bboxes_):
+    if not hasattr(save_image_with_bbox, "counter"):
+        save_image_with_bbox.counter = 0  # it doesn't exist yet, so initialize it
+    save_image_with_bbox.counter += 1
 
-#     img_to_draw = np.copy(image)
+    img_to_draw = np.copy(image)
 
-#     img_to_draw = draw_toolbox.bboxes_draw_on_img(img_to_draw, labels_, scores_, bboxes_, thickness=2)
-#     imsave(os.path.join('./debug/{}.jpg').format(save_image_with_bbox.counter), img_to_draw)
-#     return save_image_with_bbox.counter
+    # img_to_draw = draw_toolbox.bboxes_draw_on_img(img_to_draw, labels_, scores_, bboxes_, thickness=2)
+    img_to_draw = draw_toolbox.bboxes_draw_on_img_nocv2(img_to_draw, labels_, scores_, bboxes_, thickness=2)
+    imsave(os.path.join('./debug/{}.jpg').format(save_image_with_bbox.counter), img_to_draw)
+    return save_image_with_bbox.counter
 
 def ssd_model_fn(features, labels, mode, params):
     """model_fn for SSD to be used with our Estimator."""
@@ -262,14 +266,16 @@ def ssd_model_fn(features, labels, mode, params):
     # bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
     # bboxes_pred = tf.concat(bboxes_pred, axis=0)
     # save_image_op = tf.py_func(save_image_with_bbox,
-    #                         [ssd_preprocessing.unwhiten_image(features[0]),
+    #                         [ssd_preprocessing.unwhiten_image_train(features[0]),
     #                         tf.clip_by_value(cls_targets[0], 0, tf.int64.max),
     #                         match_scores[0],
     #                         bboxes_pred],
     #                         tf.int64, stateful=True)
-    # with tf.control_dependencies([save_image_op]):
 
+    # with tf.control_dependencies([save_image_op]):
     with tf.variable_scope(params['model_scope'], default_name=None, values=[features], reuse=tf.AUTO_REUSE):
+        # tf.summary.image('input_image', ssd_preprocessing.unwhiten_image_train(features[0]))
+
         backbone = ssd_net.VGG16Backbone(params['data_format'])
 
         feature_layers = backbone.forward(features, training=(mode == tf.estimator.ModeKeys.TRAIN))
@@ -284,17 +290,11 @@ def ssd_model_fn(features, labels, mode, params):
         cls_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, params['num_classes']]) for pred in cls_pred]
         location_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, 4]) for pred in location_pred]
 
-        print(cls_pred, location_pred)
-
         cls_pred = tf.concat(cls_pred, axis=1)
         location_pred = tf.concat(location_pred, axis=1)
 
-        print(cls_pred, location_pred)
-
         cls_pred = tf.reshape(cls_pred, [-1, params['num_classes']])
         location_pred = tf.reshape(location_pred, [-1, 4])
-
-        print(cls_pred, location_pred)
 
     with tf.device('/cpu:0'):
         with tf.control_dependencies([cls_pred, location_pred]):
