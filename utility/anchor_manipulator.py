@@ -219,12 +219,22 @@ class AnchorEncoder(object):
             # transform to center / size.
             gt_cy, gt_cx, gt_h, gt_w = self.point2center(gt_ymin, gt_xmin, gt_ymax, gt_xmax)
             anchor_cy, anchor_cx, anchor_h, anchor_w = self.point2center(anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax)
+
+            # gt_h = tf.check_numerics(gt_h, 'gt_h has Nan!!!', name='check_nan')
+            # gt_w = tf.check_numerics(gt_w, 'gt_w has Nan!!!', name='check_nan')
+            # anchor_h = tf.check_numerics(anchor_h, 'anchor_h has Nan!!!', name='check_nan')
+            # anchor_w = tf.check_numerics(anchor_w, 'anchor_w has Nan!!!', name='check_nan')
+
             # encode features.
-            # the prior_scaling (in fact is 5 and 10) is use for balance the regression loss of center and with(or height)
+            # the prior_scaling (in fact is 5 and 10) is use for balance the regression loss of center and width(or height)
             gt_cy = (gt_cy - anchor_cy) / anchor_h / self._prior_scaling[0]
             gt_cx = (gt_cx - anchor_cx) / anchor_w / self._prior_scaling[1]
             gt_h = tf.log(gt_h / anchor_h) / self._prior_scaling[2]
             gt_w = tf.log(gt_w / anchor_w) / self._prior_scaling[3]
+
+            gt_h = tf.check_numerics(gt_h, 'gt_h has Nan!!!', name='check_nan')
+            gt_w = tf.check_numerics(gt_w, 'gt_w has Nan!!!', name='check_nan')
+
             # now gt_localizations is our regression object, but also maybe chaos at those non-positive positions
             if debug:
                 gt_targets = tf.stack([anchors_ymin, anchors_xmin, anchors_ymax, anchors_xmax], axis=-1)
@@ -232,6 +242,11 @@ class AnchorEncoder(object):
                 gt_targets = tf.stack([gt_cy, gt_cx, gt_h, gt_w], axis=-1)
             # set all targets of non-positive positions to 0
             gt_targets = tf.expand_dims(tf.cast(matched_gt_mask, tf.float32), -1) * gt_targets
+
+            # DEBUG Nan
+            gt_targets = tf.check_numerics(gt_targets, 'Input has Nan!!!', name='check_nan')
+            # gt_targets = tf.Print(gt_targets, [gt_targets], 'gt_targest: [Nan check]',summarize=5000)
+
             self._all_anchors = (anchor_cy, anchor_cx, anchor_h, anchor_w)
             return gt_targets, gt_labels, gt_scores
 

@@ -122,14 +122,22 @@ class VGG16Backbone(object):
         for conv in self._conv1_block:
             inputs = forward_module(conv, inputs, training=training)
         inputs = self._pool1.apply(inputs)
+        
+        # inputs = tf.Print(inputs, [inputs], '[pool1, Nan Check]', summarize=200)
+        
         for conv in self._conv2_block:
             inputs = forward_module(conv, inputs, training=training)
         inputs = self._pool2.apply(inputs)
+        
+        # inputs = tf.Print(inputs, [inputs], '[pool2, Nan Check]', summarize=200)
+
         for conv in self._conv3_block:
             inputs = forward_module(conv, inputs, training=training)
         inputs = self._pool3.apply(inputs)
         for conv in self._conv4_block:
             inputs = forward_module(conv, inputs, training=training)
+
+        # inputs = tf.Print(inputs, [inputs], '[pool3, Nan Check]', summarize=200)
         # conv4_3
         with tf.variable_scope('conv4_3_scale') as scope:
             weight_scale = tf.Variable([20.] * 512, trainable=training, name='weights')
@@ -138,6 +146,7 @@ class VGG16Backbone(object):
             else:
                 weight_scale = tf.reshape(weight_scale, [1, -1, 1, 1], name='reshape')
 
+            # inputs = tf.Print(inputs, [inputs], '[conv4_3, Nan Check]', summarize=200)
             feature_layers.append(tf.multiply(weight_scale, self.l2_normalize(inputs, name='norm'), name='rescale')
                                 )
         inputs = self._pool4.apply(inputs)

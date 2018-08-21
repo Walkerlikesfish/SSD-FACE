@@ -264,18 +264,20 @@ def _process_index_metafiles(filename, base_path):
             ymin = int(cur_window[1])
             xmax = xmin + int(cur_window[2])  # ymin + width
             ymax = ymin + int(cur_window[3])  # xmin + height
-            cclass = 1
-            name_class = ''
-            for iec in range(6):
-                vec = int(cur_window[iec+4])
-                if vec > 0:
-                    cclass += 1 * CODER[iec]
-                    name_class += NAME_CLASS[iec]
-            bboxes.append((ymin,xmin,ymax,xmax))
-            ncls.append(cclass)
-            name_cls.append(name_class)
+            if (ymax > ymin) and (xmax > xmin): # valid point set
+                cclass = 1
+                name_class = ''
+                for iec in range(6):
+                    vec = int(cur_window[iec+4])
+                    if vec > 0:
+                        cclass += 1 * CODER[iec]
+                        name_class += NAME_CLASS[iec]
+                bboxes.append((ymin,xmin,ymax,xmax))
+                ncls.append(cclass)
+                name_cls.append(name_class)
 
-        all_records.append([filename, bboxes, ncls, name_cls])
+        if bboxes:
+                all_records.append([filename, bboxes, ncls, name_cls])
 
     f.close()
     return all_records

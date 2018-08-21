@@ -20,6 +20,7 @@ import os
 import sys
 
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
 import numpy as np
 
 from net import ssd_net
@@ -124,6 +125,9 @@ tf.app.flags.DEFINE_boolean(
 tf.app.flags.DEFINE_boolean(
     'multi_gpu', True,
     'Whether there is GPU to use for training.')
+tf.app.flags.DEFINE_boolean(
+    'debug_mode', False,
+    'Whether call the tf.debug CLI')
 
 FLAGS = tf.app.flags.FLAGS
 #CUDA_VISIBLE_DEVICES
@@ -262,39 +266,41 @@ def ssd_model_fn(features, labels, mode, params):
     num_anchors_per_layer = global_anchor_info['num_anchors_per_layer']
     all_num_anchors_depth = global_anchor_info['all_num_anchors_depth']
 
-    # bboxes_pred = decode_fn(loc_targets[0])
-    # bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
-    # bboxes_pred = tf.concat(bboxes_pred, axis=0)
-    # save_image_op = tf.py_func(save_image_with_bbox,
-    #                         [ssd_preprocessing.unwhiten_image_train(features[0]),
-    #                         tf.clip_by_value(cls_targets[0], 0, tf.int64.max),
-    #                         match_scores[0],
-    #                         bboxes_pred],
-    #                         tf.int64, stateful=True)
+    bboxes_pred = decode_fn(loc_targets[0])
+    bboxes_pred = [tf.reshape(preds, [-1, 4]) for preds in bboxes_pred]
+    bboxes_pred = tf.concat(bboxes_pred, axis=0)
+    save_image_op = tf.py_func(save_image_with_bbox,
+                            [ssd_preprocessing.unwhiten_image_train(features[0]),
+                            tf.clip_by_value(cls_targets[0], 0, tf.int64.max),
+                            match_scores[0],
+                            bboxes_pred],
+                            tf.int64, stateful=True)
 
-    # with tf.control_dependencies([save_image_op]):
-    with tf.variable_scope(params['model_scope'], default_name=None, values=[features], reuse=tf.AUTO_REUSE):
-        # tf.summary.image('input_image', ssd_preprocessing.unwhiten_image_train(features[0]))
+    with tf.control_dependencies([save_image_op]):
+        with tf.variable_scope(params['model_scope'], default_name=None, values=[features], reuse=tf.AUTO_REUSE):
+            # tf.summary.image('input_image', ssd_preprocessing.unwhiten_image_train(features[0]))
 
-        backbone = ssd_net.VGG16Backbone(params['data_format'])
+            backbone = ssd_net.VGG16Backbone(params['data_format'])
 
-        feature_layers = backbone.forward(features, training=(mode == tf.estimator.ModeKeys.TRAIN))
-        # get feature layers
-        location_pred, cls_pred = ssd_net.multibox_head(feature_layers, params['num_classes'], all_num_anchors_depth, data_format=params['data_format'])
-        # get location,cls pred from multibox_head
+            feature_layers = backbone.forward(features, training=(mode == tf.estimator.ModeKeys.TRAIN))
+            # get feature layers
+            location_pred, cls_pred = ssd_net.multibox_head(feature_layers, params['num_classes'], all_num_anchors_depth, data_format=params['data_format'])
+            # get location,cls pred from multibox_head
 
-        if params['data_format'] == 'channels_first':
-            cls_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in cls_pred]
-            location_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in location_pred]
+            if params['data_format'] == 'channels_first':
+                cls_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in cls_pred]
+                location_pred = [tf.transpose(pred, [0, 2, 3, 1]) for pred in location_pred]
 
-        cls_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, params['num_classes']]) for pred in cls_pred]
-        location_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, 4]) for pred in location_pred]
+            cls_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, params['num_classes']]) for pred in cls_pred]
+            location_pred = [tf.reshape(pred, [tf.shape(features)[0], -1, 4]) for pred in location_pred]
 
-        cls_pred = tf.concat(cls_pred, axis=1)
-        location_pred = tf.concat(location_pred, axis=1)
+            cls_pred = tf.concat(cls_pred, axis=1)
+            location_pred = tf.concat(location_pred, axis=1)
 
-        cls_pred = tf.reshape(cls_pred, [-1, params['num_classes']])
-        location_pred = tf.reshape(location_pred, [-1, 4])
+            cls_pred = tf.reshape(cls_pred, [-1, params['num_classes']])
+            location_pred = tf.reshape(location_pred, [-1, 4])
+
+            # location_pred = tf.Print(location_pred, [location_pred], '[location_pred, Nan Check]', summarize=1000)
 
     with tf.device('/cpu:0'):
         with tf.control_dependencies([cls_pred, location_pred]):
@@ -470,11 +476,16 @@ def main(_):
     }
     logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=FLAGS.log_every_n_steps,
                                             formatter=lambda dicts: (', '.join(['%s=%.6f' % (k, v) for k, v in dicts.items()])))
+    debug_hook = tf_debug.LocalCLIDebugHook(dump_root="/data/tmp/")
 
     #hook = tf.train.ProfilerHook(save_steps=50, output_dir='.', show_memory=True)
     print('Starting a training cycle.')
-    ssd_detector.train(input_fn=input_pipeline(dataset_pattern='train-*', is_training=True, batch_size=FLAGS.batch_size),
-                    hooks=[logging_hook], max_steps=FLAGS.max_number_of_steps)
+    if FLAGS.debug_mode:
+        ssd_detector.train(input_fn=input_pipeline(dataset_pattern='train-*', is_training=True, batch_size=FLAGS.batch_size),
+                        hooks=[logging_hook, debug_hook], max_steps=FLAGS.max_number_of_steps)
+    else:
+        ssd_detector.train(input_fn=input_pipeline(dataset_pattern='train-*', is_training=True, batch_size=FLAGS.batch_size),
+                        hooks=[logging_hook], max_steps=FLAGS.max_number_of_steps)
 
 if __name__ == '__main__':
   tf.logging.set_verbosity(tf.logging.INFO)

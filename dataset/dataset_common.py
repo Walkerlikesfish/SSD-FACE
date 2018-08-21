@@ -17,6 +17,7 @@ from __future__ import division
 from __future__ import print_function
 
 import tensorflow as tf
+import numpy as np
 
 slim = tf.contrib.slim
 
@@ -245,6 +246,10 @@ def slim_get_batch(num_classes, batch_size, split_name, file_pattern, num_reader
         glabels, gbboxes = glabels_raw, gbboxes_raw
 
     gt_targets, gt_labels, gt_scores = anchor_encoder(glabels, gbboxes)
+
+    # DEBUG Nan
+    # gt_targets = tf.check_numerics(gt_targets, 'Input has Nan!!!', name='check_nan')
+    # gt_targets = tf.Print(gt_targets, [gt_targets], 'gt_targest: [Nan check]',summarize=5000)
 
     return tf.train.batch([image, filename, shape, gt_targets, gt_labels, gt_scores],
                     dynamic_pad=False,
