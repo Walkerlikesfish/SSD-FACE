@@ -103,4 +103,5 @@ ENV/
 # checkpoints
 /model
 /logs
+/debug
 
